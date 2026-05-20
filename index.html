@@ -1,0 +1,400 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Settings, Play, Pause, RotateCcw, X, Volume2, VolumeX, 
+  Flame, Coffee, Plus, Minus, Trophy, Sparkles 
+} from 'lucide-react';
+
+export default function App() {
+  const [activityDuration, setActivityDuration] = useState(30);
+  const [restDuration, setRestDuration] = useState(30);
+  const [targetCycles, setTargetCycles] = useState(3);
+  
+  const [currentPhase, setCurrentPhase] = useState('activity');
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [isActive, setIsActive] = useState(false);
+  const [isStarted, setIsStarted] = useState(false);
+  const [completedCycles, setCompletedCycles] = useState(0);
+  const [isCompleted, setIsCompleted] = useState(false);
+  
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  
+  const audioCtxRef = useRef(null);
+
+  useEffect(() => {
+    if (!isStarted) {
+      setTimeLeft(currentPhase === 'activity' ? activityDuration : restDuration);
+    }
+  }, [activityDuration, restDuration, currentPhase, isStarted]);
+
+  const playBeep = (type) => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtxRef.current) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtxRef.current = new AudioContext();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      if (type === 'complete') {
+        const notes = [523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, index) => {
+          const osc = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+          osc.connect(gainNode);
+          gainNode.connect(ctx.destination);
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + index * 0.12);
+          gainNode.gain.setValueAtTime(0.12, ctx.currentTime + index * 0.12);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + index * 0.12 + 0.6);
+          osc.start(ctx.currentTime + index * 0.12);
+          osc.stop(ctx.currentTime + index * 0.12 + 0.6);
+        });
+        return;
+      }
+
+      const osc = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      osc.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      if (type === 'countdown') {
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.08, ctx.currentTime);
+        osc.start();
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+        osc.stop(ctx.currentTime + 0.15);
+      } else if (type === 'switch') {
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        gainNode.gain.setValueAtTime(0.15, ctx.currentTime);
+        osc.start();
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+        osc.stop(ctx.currentTime + 0.8);
+      }
+    } catch (error) {
+      console.warn("Audio Context の再生に失敗しました:", error);
+    }
+  };
+
+  useEffect(() => {
+    let interval = null;
+    if (isActive && !isCompleted) {
+      interval = setInterval(() => {
+        setTimeLeft((prevTime) => {
+          if (prevTime <= 1) {
+            if (currentPhase === 'activity') {
+              // アクティビティ終了 → セット数カウントアップ
+              const nextCycles = completedCycles + 1;
+              setCompletedCycles(nextCycles);
+              
+              // 目標セット数に到達したら完了（休憩には入らない）
+              if (targetCycles !== null && nextCycles >= targetCycles) {
+                setIsActive(false);
+                setIsCompleted(true);
+                playBeep('complete');
+                return activityDuration;
+              }
+              
+              // 未達成なら休憩へ
+              playBeep('switch');
+              setCurrentPhase('rest');
+              return restDuration;
+            } else {
+              // 休憩終了 → 次のアクティビティへ（セット数は変えない）
+              playBeep('switch');
+              setCurrentPhase('activity');
+              return activityDuration;
+            }
+          }
+          
+          if (prevTime <= 4 && prevTime > 1) {
+            playBeep('countdown');
+          }
+          
+          return prevTime - 1;
+        });
+      }, 1000);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [isActive, currentPhase, activityDuration, restDuration, soundEnabled, completedCycles, targetCycles, isCompleted]);
+
+  const toggleTimer = () => {
+    if (!audioCtxRef.current) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioCtxRef.current = new AudioContext();
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+    setIsActive(!isActive);
+    setIsStarted(true);
+  };
+
+  const resetTimer = () => {
+    setIsActive(false);
+    setIsStarted(false);
+    setCurrentPhase('activity');
+    setTimeLeft(activityDuration);
+    setCompletedCycles(0);
+    setIsCompleted(false);
+  };
+
+  const totalDuration = currentPhase === 'activity' ? activityDuration : restDuration;
+  const progressPercent = (timeLeft / totalDuration) * 100;
+  
+  // 12時から時計回りに減る：-rotate-90のみ（反転なし）、offsetは正の値で残量分だけオフセット
+  const circumference = 942.48;
+  const strokeDashoffset = circumference * (1 - progressPercent / 100);
+
+  const theme = isCompleted
+    ? {
+        background: 'from-amber-100 to-yellow-200 dark:from-slate-900 dark:to-amber-950/40',
+        card: 'bg-white/90 dark:bg-slate-900/95',
+        primary: 'text-amber-500',
+        button: 'bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-white'
+      }
+    : currentPhase === 'activity' 
+    ? {
+        background: 'from-orange-50 to-amber-100 dark:from-slate-900 dark:to-orange-950/20',
+        card: 'bg-white/80 dark:bg-slate-900/80',
+        primary: 'text-amber-600 dark:text-amber-400',
+        ring: 'stroke-amber-500',
+        ringBg: 'stroke-amber-100 dark:stroke-amber-950/50',
+        glow: 'shadow-amber-500/10',
+        button: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white',
+        icon: <Flame className="w-12 h-12 text-amber-500 animate-pulse" />,
+        label: '活動（アクティビティ）',
+        labelColor: 'text-amber-700 dark:text-amber-300'
+      }
+    : {
+        background: 'from-emerald-50 to-teal-100 dark:from-slate-900 dark:to-emerald-950/20',
+        card: 'bg-white/80 dark:bg-slate-900/80',
+        primary: 'text-emerald-600 dark:text-emerald-400',
+        ring: 'stroke-emerald-500',
+        ringBg: 'stroke-emerald-100 dark:stroke-emerald-950/50',
+        glow: 'shadow-emerald-500/10',
+        button: 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white',
+        icon: <Coffee className="w-12 h-12 text-emerald-500 animate-bounce" style={{ animationDuration: '3s' }} />,
+        label: '休憩（レスト）',
+        labelColor: 'text-emerald-700 dark:text-emerald-300'
+      };
+
+  return (
+    <div className={`min-h-screen w-full flex flex-col items-center justify-center p-6 bg-gradient-to-b ${theme.background} transition-colors duration-700 font-sans`}>
+      
+      <button 
+        onClick={() => setIsSettingsOpen(true)}
+        className="absolute top-6 left-6 p-4 rounded-full text-slate-400 hover:text-slate-700 dark:text-slate-600 dark:hover:text-slate-300 transition-all duration-300 hover:rotate-45 active:scale-95 opacity-50 hover:opacity-100 bg-white/20 dark:bg-slate-800/20 backdrop-blur-sm z-20"
+        aria-label="タイマー設定を開く"
+      >
+        <Settings className="w-8 h-8" />
+      </button>
+
+      <button 
+        onClick={() => setSoundEnabled(!soundEnabled)}
+        className="absolute top-6 right-6 p-4 rounded-full text-slate-400 hover:text-slate-700 dark:text-slate-600 dark:hover:text-slate-300 transition-all duration-300 active:scale-95 opacity-50 hover:opacity-100 bg-white/20 dark:bg-slate-800/20 backdrop-blur-sm z-20"
+        aria-label={soundEnabled ? "音声をオフにする" : "音声をオンにする"}
+      >
+        {soundEnabled ? <Volume2 className="w-8 h-8" /> : <VolumeX className="w-8 h-8" />}
+      </button>
+
+      <div className={`w-full max-w-xl p-8 rounded-3xl ${theme.card} shadow-2xl backdrop-blur-md transition-all duration-700 flex flex-col items-center text-center border border-white/20 dark:border-slate-800/30 ${theme.glow || 'shadow-amber-500/10'}`}>
+        
+        {isCompleted ? (
+          <div className="flex flex-col items-center py-6 animate-scale-up">
+            <div className="relative mb-6">
+              <Trophy className="w-24 h-24 text-amber-500 animate-bounce" style={{ animationDuration: '2.5s' }} />
+              <Sparkles className="w-8 h-8 text-yellow-400 absolute -top-2 -right-2 animate-pulse" />
+            </div>
+            <h2 className="text-4xl font-black text-amber-600 dark:text-amber-400 mb-3 tracking-wide">
+              全セット完了！
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 mb-8 max-w-sm text-lg font-medium">
+              お疲れ様でした！すべてのプログラムが終了しました。ゆっくり休んでくださいね。
+            </p>
+            <div className="bg-amber-50 dark:bg-amber-950/30 px-6 py-4 rounded-2xl border border-amber-200/50 dark:border-amber-900/30 mb-8 w-full max-w-xs">
+              <span className="block text-xs text-amber-700 dark:text-amber-400 font-bold tracking-widest uppercase mb-1">達成セット数</span>
+              <span className="text-3xl font-extrabold text-slate-800 dark:text-slate-100">
+                {completedCycles} / {targetCycles} セット
+              </span>
+            </div>
+            <button
+              onClick={resetTimer}
+              className={`py-4 px-10 rounded-2xl ${theme.button} font-extrabold tracking-wider transition-all duration-300 active:scale-95 text-lg w-full max-w-xs`}
+            >
+              もう一度行う
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-6">
+              {theme.icon}
+              <h2 className={`text-3xl font-extrabold tracking-wider ${theme.labelColor} transition-colors duration-500`}>
+                {theme.label}
+              </h2>
+            </div>
+
+            <div className="bg-slate-100 dark:bg-slate-800/60 px-5 py-2 rounded-full text-slate-600 dark:text-slate-300 text-sm font-semibold tracking-wide shadow-inner mb-6">
+              セット数: <span className="text-lg font-bold text-slate-800 dark:text-slate-100">{completedCycles}</span>
+              <span className="text-slate-400 mx-1">/</span>
+              <span className="text-slate-500 dark:text-slate-400 font-bold">
+                {targetCycles === null ? '∞' : `${targetCycles}`}
+              </span>
+            </div>
+
+            {/* 12時スタート、時計回りに減る円形プログレス */}
+            <div className="relative w-72 h-72 md:w-80 md:h-80 flex items-center justify-center my-4">
+              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 320 320">
+                <circle
+                  className={`transition-colors duration-500 ${theme.ringBg}`}
+                  strokeWidth="14"
+                  fill="transparent"
+                  r="150"
+                  cx="160"
+                  cy="160"
+                />
+                <circle
+                  className={`transition-all duration-300 ease-linear ${theme.ring}`}
+                  strokeWidth="14"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={strokeDashoffset}
+                  strokeLinecap="round"
+                  fill="transparent"
+                  r="150"
+                  cx="160"
+                  cy="160"
+                />
+              </svg>
+              
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-7xl md:text-8xl font-black font-sans tracking-tight text-slate-800 dark:text-slate-100 select-none leading-none">
+                  {timeLeft}
+                </span>
+                <span className="text-sm font-semibold text-slate-500 tracking-widest mt-2 uppercase">
+                  秒
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-6 mt-8 w-full max-w-sm">
+              <button
+                onClick={resetTimer}
+                className="flex-1 py-4 px-6 rounded-2xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold tracking-wide transition-all duration-200 active:scale-95 flex items-center justify-center gap-2"
+                aria-label="タイマーをリセット"
+              >
+                <RotateCcw className="w-5 h-5" />
+                リセット
+              </button>
+              <button
+                onClick={toggleTimer}
+                className={`flex-1 py-4 px-6 rounded-2xl ${theme.button} font-bold tracking-wider transition-all duration-300 active:scale-95 flex items-center justify-center gap-2`}
+                aria-label={isActive ? "タイマーを一時停止" : "タイマーを開始"}
+              >
+                {isActive ? (
+                  <><Pause className="w-6 h-6 fill-current" />一時停止</>
+                ) : (
+                  <><Play className="w-6 h-6 fill-current" />スタート</>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl shadow-2xl p-6 relative border border-slate-100 dark:border-slate-800 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <button 
+              onClick={() => setIsSettingsOpen(false)}
+              className="absolute top-5 right-5 p-2 rounded-full text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 transition-colors"
+              aria-label="設定を閉じる"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <Settings className="w-6 h-6 text-slate-500" />
+              タイマー設定
+            </h3>
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2">
+                  🔥 活動（アクティビティ）時間
+                </label>
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
+                  <button onClick={() => setActivityDuration(prev => Math.max(1, prev - 5))} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold text-lg">-5s</button>
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-extrabold font-sans text-amber-500">{activityDuration}</span>
+                    <span className="text-xs text-slate-400">秒</span>
+                  </div>
+                  <button onClick={() => setActivityDuration(prev => prev + 5)} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold text-lg">+5s</button>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {[15, 30, 45, 60, 90].map((sec) => (
+                    <button key={`act-${sec}`} onClick={() => setActivityDuration(sec)} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${activityDuration === sec ? 'bg-amber-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>{sec}秒</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2">
+                  ☕ 休憩（レスト）時間
+                </label>
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
+                  <button onClick={() => setRestDuration(prev => Math.max(1, prev - 5))} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold text-lg">-5s</button>
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-extrabold font-sans text-emerald-500">{restDuration}</span>
+                    <span className="text-xs text-slate-400">秒</span>
+                  </div>
+                  <button onClick={() => setRestDuration(prev => prev + 5)} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold text-lg">+5s</button>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {[10, 15, 30, 45, 60].map((sec) => (
+                    <button key={`rest-${sec}`} onClick={() => setRestDuration(sec)} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${restDuration === sec ? 'bg-emerald-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>{sec}秒</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-slate-600 dark:text-slate-400 mb-2">
+                  🔁 目標セット数
+                </label>
+                <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-100 dark:border-slate-800">
+                  <button onClick={() => setTargetCycles(prev => { if (prev === null) return 1; if (prev <= 1) return null; return prev - 1; })} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold"><Minus className="w-5 h-5 mx-auto" /></button>
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-extrabold text-blue-500">{targetCycles === null ? 'なし' : targetCycles}</span>
+                    <span className="text-xs text-slate-400">{targetCycles === null ? 'ずっと繰り返す' : 'セット'}</span>
+                  </div>
+                  <button onClick={() => setTargetCycles(prev => { if (prev === null) return 1; return prev + 1; })} className="p-3 bg-white dark:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 active:scale-95 transition-all font-bold"><Plus className="w-5 h-5 mx-auto" /></button>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {[null, 3, 5, 10].map((val) => (
+                    <button key={`cycle-${val === null ? 'infinite' : val}`} onClick={() => setTargetCycles(val)} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${targetCycles === val ? 'bg-blue-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>{val === null ? 'なし' : `${val}回`}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center justify-between py-2 border-t border-slate-100 dark:border-slate-800 mt-6 pt-4">
+                <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-2">
+                  {soundEnabled ? <Volume2 className="w-5 h-5 text-slate-500" /> : <VolumeX className="w-5 h-5 text-slate-400" />}
+                  残り3秒のカウントダウン音
+                </span>
+                <button onClick={() => setSoundEnabled(!soundEnabled)} className={`w-14 h-8 rounded-full transition-colors relative flex items-center ${soundEnabled ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'}`}>
+                  <span className={`w-6 h-6 bg-white rounded-full absolute shadow transition-transform ${soundEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            </div>
+            <button onClick={() => setIsSettingsOpen(false)} className={`w-full mt-8 py-4 ${theme.button} font-extrabold rounded-2xl transition-all tracking-wide text-center active:scale-95 duration-200`}>
+              設定を適用して戻る
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
+        .animate-scale-up { animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+      `}</style>
+    </div>
+  );
+}
